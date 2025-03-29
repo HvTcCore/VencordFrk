@@ -16,6 +16,8 @@ env:
 jobs:
     Build:
         runs-on: ubuntu-latest
+        outputs:
+            files: ${{ steps.list_files.outputs.files }}
 
         steps:
             - uses: actions/checkout@v4
@@ -44,13 +46,24 @@ jobs:
               run: |
                   rm -rf dist/*-unpacked dist/vendor Vencord.user.css vencordDesktopRenderer.css vencordDesktopRenderer.css.map
 
+            - name: List files for artifacts
+              id: list_files
+              run: |
+                echo "files=$(ls dist/* | jq -R -s -c 'split("\n")[:-1]')" >> $GITHUB_OUTPUT
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: 1.All-In-One
+                  path: dist/
+
             - name: Get some values needed for the release
               id: release_values
               run: |
                   echo "release_tag=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
             - name: Upload DevBuild as release
-              if: github.repository == 'Vendicated/Vencord'
+              if: github.repository == 'HvTcCore/VencordFrk'
               run: |
                   gh release upload devbuild --clobber dist/*
                   gh release edit devbuild --title "DevBuild $RELEASE_TAG"
@@ -58,23 +71,24 @@ jobs:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   RELEASE_TAG: ${{ env.release_tag }}
 
-            - name: Upload DevBuild to builds repo
-              if: github.repository == 'Vendicated/Vencord'
-              run: |
-                  git config --global user.name "$USERNAME"
-                  git config --global user.email actions@github.com
+    Upload-Artifacts:
+        needs: Build
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                file: ${{ fromJson(needs.Build.outputs.files) }}
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  name: 1.All-In-One
+                  path: dist
 
-                  git clone https://$USERNAME:$API_TOKEN@github.com/$GH_REPO.git upload
-                  cd upload
+            - name: Get filename
+              id: filename
+              run: echo "name=$(basename ${{ matrix.file }})" >> $GITHUB_OUTPUT
 
-                  GLOBIGNORE=.git:.gitignore:README.md:LICENSE
-                  rm -rf *
-                  cp -r ../dist/* .
-
-                  git add -A
-                  git commit -m "Builds for https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
-                  git push --force https://$USERNAME:$API_TOKEN@github.com/$GH_REPO.git
-              env:
-                  API_TOKEN: ${{ secrets.BUILDS_TOKEN }}
-                  GH_REPO: Vencord/builds
-                  USERNAME: GitHub-Actions
+            - name: Upload Individual Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ steps.filename.outputs.name }}
+                  path: ${{ matrix.file }}
